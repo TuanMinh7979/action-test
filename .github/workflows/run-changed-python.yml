@@ -1,0 +1,56 @@
+name: Run Changed Python Files
+
+on:
+  push:
+    branches:
+      - main   # đổi thành branch của mày nếu khác (master, dev, ...)
+
+jobs:
+  run-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # cần ít nhất 2 commit để diff trước/sau
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Lấy danh sách file .py thay đổi trong commit
+        id: changed
+        run: |
+          # So sánh commit hiện tại với commit trước đó
+          FILES=$(git diff --name-only --diff-filter=ACM ${{ github.event.before }} ${{ github.sha }} -- '*.py' || true)
+
+          if [ -z "$FILES" ]; then
+            echo "Không có file .py nào thay đổi."
+            echo "files=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Các file .py thay đổi:"
+            echo "$FILES"
+            # gộp thành 1 dòng, cách nhau bằng khoảng trắng, để pass qua step sau
+            echo "files=$(echo $FILES | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Chạy file nếu có hàm main / __main__
+        if: steps.changed.outputs.files != ''
+        run: |
+          for file in ${{ steps.changed.outputs.files }}; do
+            if [ -f "$file" ]; then
+              echo "----------------------------------------"
+              echo "Kiểm tra file: $file"
+
+              if grep -qE '^\s*def\s+main\s*\(' "$file" || grep -qE '__name__\s*==\s*["'"'"']__main__["'"'"']' "$file"; then
+                echo ">>> Có hàm main hoặc __main__ block, đang chạy: $file"
+                python "$file"
+              else
+                echo ">>> Không tìm thấy main(), bỏ qua: $file"
+              fi
+            else
+              echo "File $file không còn tồn tại (đã bị xoá), bỏ qua."
+            fi
+          done
